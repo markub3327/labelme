@@ -399,17 +399,10 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Undo last drawn point"),
             enabled=False,
         )
-        addPointToEdge = action(
-            text=self.tr("Add Point to Edge"),
-            slot=self.canvas.addPointToEdge,
-            shortcut=shortcuts["add_point_to_edge"],
-            icon="edit",
-            tip=self.tr("Add point to the nearest edge"),
-            enabled=False,
-        )
         removePoint = action(
             text="Remove Selected Point",
             slot=self.removeSelectedPoint,
+            shortcut=shortcuts["remove_selected_point"],
             icon="edit",
             tip="Remove selected point from polygon",
             enabled=False,
@@ -484,6 +477,14 @@ class MainWindow(QtWidgets.QMainWindow):
             "zoom",
             self.tr("Zoom to original size"),
             enabled=False,
+        )
+        keepPrevScale = action(
+            self.tr("&Keep Previous Scale"),
+            self.enableKeepPrevScale,
+            tip=self.tr("Keep previous zoom scale"),
+            checkable=True,
+            checked=self._config["keep_prev_scale"],
+            enabled=True,
         )
         fitWindow = action(
             self.tr("&Fit Window"),
@@ -573,7 +574,6 @@ class MainWindow(QtWidgets.QMainWindow):
             copy=copy,
             undoLastPoint=undoLastPoint,
             undo=undo,
-            addPointToEdge=addPointToEdge,
             removePoint=removePoint,
             createMode=createMode,
             editMode=editMode,
@@ -586,6 +586,7 @@ class MainWindow(QtWidgets.QMainWindow):
             zoomIn=zoomIn,
             zoomOut=zoomOut,
             zoomOrg=zoomOrg,
+            keepPrevScale=keepPrevScale,
             fitWindow=fitWindow,
             fitWidth=fitWidth,
             brightnessContrast=brightnessContrast,
@@ -603,7 +604,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 undo,
                 undoLastPoint,
                 None,
-                addPointToEdge,
+                removePoint,
                 None,
                 toggle_keep_prev_mode,
             ),
@@ -621,7 +622,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 delete,
                 undo,
                 undoLastPoint,
-                addPointToEdge,
                 removePoint,
             ),
             onLoadActive=(
@@ -638,7 +638,6 @@ class MainWindow(QtWidgets.QMainWindow):
             onShapesPresent=(saveAs, hideAll, showAll),
         )
 
-        self.canvas.edgeSelected.connect(self.canvasShapeEdgeSelected)
         self.canvas.vertexSelected.connect(self.actions.removePoint.setEnabled)
 
         self.menus = utils.struct(
@@ -686,6 +685,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 zoomIn,
                 zoomOut,
                 zoomOrg,
+                keepPrevScale,
                 None,
                 fitWindow,
                 fitWidth,
@@ -876,11 +876,6 @@ class MainWindow(QtWidgets.QMainWindow):
             z.setEnabled(value)
         for action in self.actions.onLoadActive:
             action.setEnabled(value)
-
-    def canvasShapeEdgeSelected(self, selected, shape):
-        self.actions.addPointToEdge.setEnabled(
-            selected and shape and shape.canAddPoint()
-        )
 
     def queueEvent(self, function):
         QtCore.QTimer.singleShot(0, function)
@@ -1391,6 +1386,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.zoomMode = self.FIT_WIDTH if value else self.MANUAL_ZOOM
         self.adjustScale()
 
+    def enableKeepPrevScale(self, enabled):
+        self._config["keep_prev_scale"] = enabled
+        self.actions.keepPrevScale.setChecked(enabled)
+
     def onNewBrightnessContrast(self, qimage):
         self.canvas.loadPixmap(
             QtGui.QPixmap.fromImage(qimage), clear_shapes=False
@@ -1519,7 +1518,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.setScroll(
                     orientation, self.scroll_values[orientation][self.filename]
                 )
-        # set brightness constrast values
+        # set brightness contrast values
         dialog = BrightnessContrastDialog(
             utils.img_data_to_pil(self.imageData),
             self.onNewBrightnessContrast,
@@ -1882,6 +1881,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def removeSelectedPoint(self):
         self.canvas.removeSelectedPoint()
+        self.canvas.update()
         if not self.canvas.hShape.points:
             self.canvas.deleteShape(self.canvas.hShape)
             self.remLabels([self.canvas.hShape])
