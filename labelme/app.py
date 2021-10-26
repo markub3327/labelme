@@ -41,7 +41,7 @@ from labelme.widgets import ZoomWidget
 # - Zoom is too "steppy".
 
 
-LABEL_COLORMAP = imgviz.label_colormap(value=200)
+LABEL_COLORMAP = imgviz.label_colormap()
 
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -94,6 +94,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dirty = False
 
         self._noSelectionSlot = False
+
+        self._copied_shapes = None
 
         # Main widgets and related state.
         self.labelDialog = LabelDialog(
@@ -381,12 +383,28 @@ class MainWindow(QtWidgets.QMainWindow):
             self.tr("Delete the selected polygons"),
             enabled=False,
         )
-        copy = action(
+        duplicate = action(
             self.tr("Duplicate Polygons"),
-            self.copySelectedShape,
+            self.duplicateSelectedShape,
             shortcuts["duplicate_polygon"],
             "copy",
             self.tr("Create a duplicate of the selected polygons"),
+            enabled=False,
+        )
+        copy = action(
+            self.tr("Copy Polygons"),
+            self.copySelectedShape,
+            shortcuts["copy_polygon"],
+            "copy_clipboard",
+            self.tr("Copy selected polygons to clipboard"),
+            enabled=False,
+        )
+        paste = action(
+            self.tr("Paste Polygons"),
+            self.pasteSelectedShape,
+            shortcuts["paste_polygon"],
+            "paste",
+            self.tr("Paste copied polygons"),
             enabled=False,
         )
         undoLastPoint = action(
@@ -569,7 +587,9 @@ class MainWindow(QtWidgets.QMainWindow):
             toggleKeepPrevMode=toggle_keep_prev_mode,
             delete=delete,
             edit=edit,
+            duplicate=duplicate,
             copy=copy,
+            paste=paste,
             undoLastPoint=undoLastPoint,
             undo=undo,
             removePoint=removePoint,
@@ -596,7 +616,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # XXX: need to add some actions here to activate the shortcut
             editMenu=(
                 edit,
-                copy,
+                duplicate,
                 delete,
                 None,
                 undo,
@@ -616,7 +636,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 createLineStripMode,
                 editMode,
                 edit,
+                duplicate,
                 copy,
+                paste,
                 delete,
                 undo,
                 undoLastPoint,
@@ -716,7 +738,9 @@ class MainWindow(QtWidgets.QMainWindow):
             None,
             createMode,
             editMode,
+            duplicate,
             copy,
+            paste,
             delete,
             undo,
             brightnessContrast,
@@ -1048,8 +1072,14 @@ class MainWindow(QtWidgets.QMainWindow):
         shape.label = text
         shape.flags = flags
         shape.group_id = group_id
+
+        self._update_shape_color(shape)
         if shape.group_id is None:
-            item.setText(shape.label)
+            item.setText(
+                '{} <font color="#{:02x}{:02x}{:02x}">●</font>'.format(
+                    shape.label, *shape.fill_color.getRgb()[:3]
+                )
+            )
         else:
             item.setText("{} ({})".format(shape.label, shape.group_id))
         self.setDirty()
@@ -1095,6 +1125,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._noSelectionSlot = False
         n_selected = len(selected_shapes)
         self.actions.delete.setEnabled(n_selected)
+        self.actions.duplicate.setEnabled(n_selected)
         self.actions.copy.setEnabled(n_selected)
         self.actions.edit.setEnabled(n_selected == 1)
 
@@ -1114,14 +1145,15 @@ class MainWindow(QtWidgets.QMainWindow):
         for action in self.actions.onShapesPresent:
             action.setEnabled(True)
 
-        rgb = self._get_rgb_by_label(shape.label)
-
-        r, g, b = rgb
+        self._update_shape_color(shape)
         label_list_item.setText(
             '{} <font color="#{:02x}{:02x}{:02x}">●</font>'.format(
-                text, r, g, b
+                text, *shape.fill_color.getRgb()[:3]
             )
         )
+
+    def _update_shape_color(self, shape):
+        r, g, b = self._get_rgb_by_label(shape.label)
         shape.line_color = QtGui.QColor(r, g, b)
         shape.vertex_fill_color = QtGui.QColor(r, g, b)
         shape.hvertex_fill_color = QtGui.QColor(255, 255, 255)
@@ -1257,12 +1289,20 @@ class MainWindow(QtWidgets.QMainWindow):
             )
             return False
 
-    def copySelectedShape(self):
-        added_shapes = self.canvas.copySelectedShapes()
+    def duplicateSelectedShape(self):
+        added_shapes = self.canvas.duplicateSelectedShapes()
         self.labelList.clearSelection()
         for shape in added_shapes:
             self.addLabel(shape)
         self.setDirty()
+
+    def pasteSelectedShape(self):
+        self.loadShapes(self._copied_shapes, replace=False)
+        self.setDirty()
+
+    def copySelectedShape(self):
+        self._copied_shapes = [s.copy() for s in self.canvas.selectedShapes]
+        self.actions.paste.setEnabled(len(self._copied_shapes) > 0)
 
     def labelSelectionChanged(self):
         if self._noSelectionSlot:
@@ -1629,7 +1669,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def openPrevImg(self, _value=False):
         keep_prev = self._config["keep_prev"]
-        if Qt.KeyboardModifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+        if QtWidgets.QApplication.keyboardModifiers() == (
+            Qt.ControlModifier | Qt.ShiftModifier
+        ):
             self._config["keep_prev"] = True
 
         if not self.mayContinue():
@@ -1651,7 +1693,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def openNextImg(self, _value=False, load=True):
         keep_prev = self._config["keep_prev"]
-        if Qt.KeyboardModifiers() == (Qt.ControlModifier | Qt.ShiftModifier):
+        if QtWidgets.QApplication.keyboardModifiers() == (
+            Qt.ControlModifier | Qt.ShiftModifier
+        ):
             self._config["keep_prev"] = True
 
         if not self.mayContinue():
